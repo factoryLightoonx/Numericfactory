@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory Game</title>
+<style>
+:root { --bg:#121314; --panel:#1b1d20; --tile:#2a2d33; --gen:#2ea04f; --sell:#e13b5a; --belt:#b88b00; --mult:#9b59b6; }
+html,body {margin:0;height:100%;background:var(--bg);font-family:sans-serif;color:#fff}
+.app{display:flex;height:100%;gap:8px;padding:8px}
+#game{display:grid;grid-template-columns:repeat(12,50px);grid-template-rows:repeat(12,50px);gap:4px;background:var(--panel);padding:6px;border-radius:6px;}
+.cell{width:50px;height:50px;background:var(--tile);border-radius:4px;position:relative;}
+.placed{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#000;border-radius:4px;cursor:grab;user-select:none;position:absolute;top:0;left:0;}
+.generator{background:var(--gen);}
+.sellpad{background:var(--sell);}
+.belt{background:var(--belt);}
+.multiplier{background:var(--mult);}
+.rot{transform:rotate(var(--rot,0deg));transition:transform 0.2s;}
+.num{width:34px;height:34px;border-radius:6px;background:#3a50ff;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;}
+#sidebar{width:220px;background:#0d0e10;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.buy{background:#1a1c1f;padding:10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;}
+.tray{display:flex;flex-direction:column;gap:4px;}
+#money{text-align:center;font-weight:bold;margin-bottom:6px;}
+#cps{text-align:center;font-weight:bold;margin-bottom:6px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="game"></div>
+  <div id="sidebar">
+    <div id="money">💰 100</div>
+    <div id="cps">CPS: 0</div>
+
+    <!-- Tab buttons -->
+    <div style="display:flex;gap:4px;margin-bottom:6px;">
+      <button id="tab-machines">Machines</button>
+      <button id="tab-upgrades">Upgrades</button>
+    </div>
+
+    <!-- Machines section -->
+    <div id="machines-shop" style="display:flex;flex-direction:column;gap:4px;">
+      <div class="buy" data-type="generator" data-cost="30">Generator <span>30</span></div>
+      <div class="buy" data-type="sellpad" data-cost="25">Sell Pad <span>25</span></div>
+      <div class="buy" data-type="belt" data-cost="25">Belt <span>25</span></div>
+      <div class="buy" data-type="multiplier" data-cost="50">Multiplier <span>50</span></div>
+    </div>
+
+    <!-- Upgrades section -->
+    <div id="upgrades-shop" style="display:none;flex-direction:column;gap:4px;">
+      <div class="buy" data-type="upgrade" data-upgrade="smoother" data-cost="10">Smoother Generator <span>10</span></div>
+      <div class="buy" data-type="upgrade" data-upgrade="oiled" data-cost="25">Oiled Generator <span>25</span></div>
+      <div class="buy" data-type="upgrade" data-upgrade="overclocked" data-cost="50">Overclocked Generators <span>50</span></div>
+    </div>
+
+    <div class="tray" id="tray"></div>
+  </div>
+</div>
+
+<script>
+const COLS=12,ROWS=12;
+const game=document.getElementById('game');
+const tiles=[];
+const placed={};
+const numbers=[];
+let money=100;
+document.getElementById('money').textContent="💰 "+money;
+
+// Track cash earned from selling numbers for CPS
+let cashEarnedThisSecond = 0;
+
+// Initialize grid
+for(let i=0;i<COLS*ROWS;i++){
+  const cell=document.createElement('div');cell.className='cell';cell.dataset.index=i;game.appendChild(cell);tiles.push(cell);
+}
+
+// Tab switching with correct vertical layout
+const tabMachines=document.getElementById('tab-machines');
+const tabUpgrades=document.getElementById('tab-upgrades');
+const machinesShop=document.getElementById('machines-shop');
+const upgradesShop=document.getElementById('upgrades-shop');
+
+tabMachines.addEventListener('click',()=>{
+  machinesShop.style.display='flex';
+  machinesShop.style.flexDirection='column';
+  upgradesShop.style.display='none';
+});
+tabUpgrades.addEventListener('click',()=>{
+  machinesShop.style.display='none';
+  upgradesShop.style.display='flex';
+  upgradesShop.style.flexDirection='column';
+});
+
+// Sidebar money & CPS
+function updateMoney(){document.getElementById('money').textContent="💰 "+money;}
+setInterval(()=>{
+  const cpsValue = cashEarnedThisSecond.toFixed(2);
+  document.getElementById('cps').textContent="CPS: "+cpsValue;
+  cashEarnedThisSecond = 0; // reset counter
+},1000);
+
+// Placement function
+function addPlaced(type,index){
+  const el=document.createElement('div');
+  el.className=`placed ${type} rot`;
+  el.dataset.type=type;el.dataset.index=index;el.dataset.rot=0;
+  el.style.setProperty('--rot','0deg');
+  el.textContent=type==='generator'?'G':type==='sellpad'?'S':type==='belt'?'→':'M';
+  makeDraggable(el);tiles[index].appendChild(el);placed[index]={type,el,rot:0};
+}
+
+// Draggable logic
+function makeDraggable(el){
+  el.draggable=true;
+  el.addEventListener('dragstart',ev=>{ev.dataTransfer.setData('index',el.dataset.index);});
+}
+game.addEventListener('dragover',e=>e.preventDefault());
+game.addEventListener('drop',e=>{
+  e.preventDefault();
+  const fromIndex=parseInt(e.dataTransfer.getData('index'));
+  const toCell=document.elementFromPoint(e.clientX,e.clientY).closest('.cell');
+  if(!toCell) return;
+  const toIndex=parseInt(toCell.dataset.index);
+  if(placed[toIndex]) return;
+  const obj=placed[fromIndex]; if(!obj) return;
+  delete placed[fromIndex];
+  obj.el.dataset.index=toIndex; placed[toIndex]=obj;
+  toCell.appendChild(obj.el);
+});
+
+// Right-click rotation
+game.addEventListener('contextmenu',e=>{
+  const target=e.target.closest('.placed');
+  if(target){e.preventDefault(); let r=parseInt(target.dataset.rot)||0; r=(r+90)%360; target.dataset.rot=r; target.style.setProperty('--rot',r+'deg'); placed[target.dataset.index].rot=r;}
+});
+
+// Generator upgrades
+let generatorInterval=1500; // 1.5s
+let overclocked=false;
+
+// Buy buttons logic
+document.querySelectorAll('.buy').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const cost=parseInt(b.dataset.cost);
+    if(money<cost){alert("Not enough money!"); return;}
+    money-=cost; updateMoney();
+    const type=b.dataset.type;
+    if(type==='upgrade'){
+      const upgrade=b.dataset.upgrade;
+      if(upgrade==='smoother') generatorInterval=Math.max(100,generatorInterval-500);
+      if(upgrade==='oiled') generatorInterval=Math.max(100,generatorInterval-500);
+      if(upgrade==='overclocked') overclocked=true;
+      b.remove();
+    } else {
+      const empty=tiles.find((t,i)=>!placed[i]);
+      if(empty) addPlaced(type,parseInt(empty.dataset.index));
+    }
+  });
+});
+
+// Generator spawn
+setInterval(()=>{
+  Object.entries(placed).forEach(([idx,obj])=>{
+    if(obj.type!=='generator') return;
+    const dir=obj.rot||0;
+    let spawnIndex;
+    if(dir===0) spawnIndex=parseInt(idx)+COLS;
+    if(dir===90) spawnIndex=parseInt(idx)+1;
+    if(dir===180) spawnIndex=parseInt(idx)-COLS;
+    if(dir===270) spawnIndex=parseInt(idx)-1;
+    if(spawnIndex<0||spawnIndex>=COLS*ROWS) return;
+
+    const count = overclocked?2:1;
+    for(let i=0;i<count;i++){
+      if(numbers.find(n=>n.index===spawnIndex)) continue;
+      const nEl=document.createElement('div'); nEl.className='num'; nEl.textContent='1';
+      tiles[spawnIndex].appendChild(nEl);
+      numbers.push({index:spawnIndex,el:nEl,value:1});
+    }
+  });
+}, generatorInterval);
+
+// Move numbers, merge, sell pads, belts, multiplier
+setInterval(()=>{
+  numbers.slice().forEach(n=>{
+    const obj=placed[n.index];
+    if(obj && obj.type==='sellpad'){money+=n.value; cashEarnedThisSecond+=n.value; updateMoney(); n.el.remove(); numbers.splice(numbers.indexOf(n),1); return;}
+    if(obj && obj.type==='belt'){
+      const dir=obj.rot||0; let next=n.index;
+      if(dir===0) next+=COLS;if(dir===90) next+=1;if(dir===180) next-=COLS;if(dir===270) next-=1;
+      if(next<0||next>=COLS*ROWS) return;
+      if(numbers.find(x=>x.index===next)) return;
+      tiles[next].appendChild(n.el);n.index=next;
+    }
+    if(obj && obj.type==='multiplier'){
+      const dir=obj.rot||0; let next=n.index;
+      if(dir===0) next+=COLS;if(dir===90) next+=1;if(dir===180) next-=COLS;if(dir===270) next-=1;
+      if(next<0||next>=COLS*ROWS) return;
+      const other=numbers.find(x=>x.index===next);
+      if(other){other.value*=n.value;n.el.remove();numbers.splice(numbers.indexOf(n),1);other.el.textContent=other.value;}
+    }
+  });
+},200);
+</script>
+</body>
+</html>
